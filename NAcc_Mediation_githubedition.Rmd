@@ -1,0 +1,419 @@
+---
+title: "NAcc_Mediation_githubedition"
+output: html_document
+date: "2026-07-21"
+---
+
+```{r Packages, include=FALSE}
+
+library(effectsize)
+library(dplyr)
+library(psych)
+library(ggplot2)
+library(lme4)
+library(lmerTest)
+library(reshape2)
+library(writexl)
+library(janitor)
+library(rainbow)
+library(tidyr)
+library(mediation)
+library(standardize)
+library (readr)
+
+```
+
+```{r Puberty}
+
+pds_y = read_tsv('ABCDdatadir/phenotype/ph_y_pds.tsv',show_col_types = FALSE)
+
+#filtering and subsetting by Year 1 and each variable
+pds_USE <- filter(pds_y, session_id=='ses-01A')
+pds_USE = pds_USE[c("participant_id", "session_id", "ph_y_pds_001", "ph_y_pds_003", "ph_y_pds_002", "ph_y_pds__f_001", "ph_y_pds__f_002", "ph_y_pds__m_001", "ph_y_pds__m_002")]
+
+#Coding 777, 999, and n/a as NA
+pds_777 = pds_USE[pds_USE$ph_y_pds_001 == 777,]
+pds_999 = pds_USE[pds_USE$ph_y_pds_001 == 999,]
+pds_na1 = pds_USE[pds_USE$ph_y_pds__f_001 == 'n/a',]
+pds_USE[pds_USE==777] <- NA
+pds_USE[pds_USE==999] <- NA
+pds_USE[pds_USE=='n/a'] <- NA
+
+str(pds_USE)
+pds_USE$ph_y_pds_001 <- as.numeric(pds_USE$ph_y_pds_001)
+pds_USE$ph_y_pds__f_001 <- as.numeric(pds_USE$ph_y_pds__f_001)
+pds_USE$ph_y_pds__f_002 <- as.numeric(pds_USE$ph_y_pds__f_002)
+pds_USE$ph_y_pds__m_001 <- as.numeric(pds_USE$ph_y_pds__m_001)
+pds_USE$ph_y_pds__m_002 <- as.numeric(pds_USE$ph_y_pds__m_002)
+
+#creating a PDS average score
+pds_USE$pds_avg = rowMeans(pds_USE[,c("ph_y_pds_001","ph_y_pds_003", "ph_y_pds_002", "ph_y_pds__f_001", "ph_y_pds__f_002", "ph_y_pds__m_001", "ph_y_pds__m_002")], na.rm=TRUE)
+
+pds_USE=pds_USE[c("pds_avg", "participant_id", "session_id")]
+pds_USE=pds_USE[complete.cases(pds_USE),]
+
+
+```
+
+```{r ELA}
+
+#Redone with the ELA+ code from from the Breslin et al. (2025). 
+elacba=read.csv("ela_plus_abcd_new.csv")
+colnames(elacba)
+
+#filtering baseline and subsetting to what we need
+elacba <- filter(elacba, session_id=='ses-00A')
+elacba=elacba[c("ela_plus", "participant_id", "session_id")]
+
+elacba=elacba[complete.cases(elacba),]
+
+#joining
+final_combo = full_join(pds_USE, elacba, by=c('participant_id'))
+
+final_combo=final_combo[complete.cases(final_combo),]
+
+
+```
+
+```{r Func Data Reading}
+
+#reading in the functional data
+nacc_defl = read_tsv('ABCDdatadir/phenotype/mr_y_rsfmri__corr__gpnet__aseg.tsv',show_col_types = FALSE)
+
+#keeping year 2 data
+nacc_filtered = filter(nacc_defl, session_id=="ses-02A")
+nacc_filtered = dplyr::select(nacc_filtered, participant_id, session_id, mr_y_rsfmri__corr__gpnet__aseg__def__ab__lh_mean, mr_y_rsfmri__corr__gpnet__aseg__def__ab__rh_mean, mr_y_rsfmri__corr__gpnet__aseg__frp__ab__lh_mean, mr_y_rsfmri__corr__gpnet__aseg__frp__ab__rh_mean)
+
+#reading in the inclusion criteria
+inclusion = read_tsv('ABCDdatadir/phenotype/mr_y_qc__incl.tsv',show_col_types = FALSE)
+table(inclusion$session_id)
+
+inclusion_filtered <- inclusion[!duplicated(inclusion), ]
+inclusion_filtered = filter(inclusion, mr_y_qc__incl__rsfmri_indicator==1, session_id=='ses-02A')
+inclusion_filtered = dplyr::select(inclusion_filtered, participant_id, session_id, mr_y_qc__incl__rsfmri_indicator)
+
+#including the functional data
+nacc_filtered=nacc_filtered[complete.cases(nacc_filtered),]
+
+final_combo = full_join(nacc_filtered, final_combo, by=('participant_id'))
+final_combo=final_combo[complete.cases(final_combo),]
+
+#including the functional QC inclusion
+inclusion_filtered=inclusion_filtered[complete.cases(inclusion_filtered),]
+
+final_combo = full_join(inclusion_filtered, final_combo, by=('participant_id'))
+final_combo=final_combo[complete.cases(final_combo),]
+
+
+```
+
+```{r Scanner ID}
+
+covariates = read_tsv('ABCDdatadir/phenotype/mr_y_adm__info.tsv',show_col_types = FALSE)
+
+scannerid = filter(covariates, session_id=='ses-02A')
+scannerid_USE = dplyr::select(scannerid, participant_id, session_id, mr_y_adm__info__dev_serial)
+
+#excluding youth who were scanned on 000000000UM750MR & HASH31ce566d since there were only 12 participants combined
+scannerid_USE = dplyr::filter(scannerid_USE, mr_y_adm__info__dev_serial != "000000000UM750MR")
+scannerid_USE = dplyr::filter(scannerid_USE, mr_y_adm__info__dev_serial != "HASH31ce566d")
+scannerid_USE = dplyr::filter(scannerid_USE, mr_y_adm__info__dev_serial != "HASHc1b3365b")
+
+scannerid_USE=scannerid_USE[complete.cases(scannerid_USE),]
+
+final_combo = full_join(scannerid_USE, final_combo, by=('participant_id'))
+final_combo=final_combo[complete.cases(final_combo),]
+
+```
+
+```{r Covariates}
+
+#age & site
+age_famid = read_tsv('ABCDdatadir/phenotype/ab_g_dyn.tsv',show_col_types = FALSE)
+age_famid = age_famid[c("participant_id", "session_id", "ab_g_dyn__visit_age", "ab_g_dyn__design_site")] 
+colnames(age_famid)
+
+#separating site ID at baseline
+fam_id = filter(age_famid, session_id=='ses-00A')
+fam_id_USE = dplyr::select(fam_id, participant_id, session_id, ab_g_dyn__design_site)
+fam_id_USE$ab_g_dyn__design_site = as.factor(fam_id_USE$ab_g_dyn__design_site)
+
+final_combo = full_join(fam_id_USE, final_combo, by=('participant_id'))
+final_combo=final_combo[complete.cases(final_combo),]
+
+#age at year 2
+age = filter(age_famid, session_id=='ses-02A')
+age_USE = dplyr::select(age, participant_id, session_id, ab_g_dyn__visit_age)
+age_USE=age_USE[complete.cases(age_USE),]
+
+final_combo = full_join(age_USE, final_combo, by=('participant_id'))
+final_combo=final_combo[complete.cases(final_combo),]
+
+#including sex, race/ethnicity, family ID
+demo_USE = read_tsv('ABCDdatadir/phenotype/ab_g_stc.tsv',show_col_types = FALSE)
+colnames(demo_USE)
+demo_USE = dplyr::select(demo_USE, participant_id, ab_g_stc__design_id__fam, ab_g_stc__cohort_sex, ab_g_stc__cohort_ethnrace__leg)
+
+#centering sex
+demo_USE$ab_g_stc__cohort_sex = scale(demo_USE$ab_g_stc__cohort_sex, center = TRUE, scale = FALSE)
+table(demo_USE$ab_g_stc__cohort_sex)
+# -0.478429389956185 = male 
+# 0.521570610043815  = female
+
+demo_USE=demo_USE[complete.cases(demo_USE),]
+
+#including parental education
+edu = read_tsv('ABCDdatadir/phenotype/ab_p_demo.tsv',show_col_types = FALSE)
+edu = edu[c("participant_id", "session_id", "ab_p_demo__edu__slf_001")] 
+edu = filter(edu, session_id=='ses-00A')
+
+edu=edu[complete.cases(edu),]
+
+demo_USE = full_join(edu, demo_USE, by=c('participant_id'))
+
+#making Family ID as a factor
+demo_USE$ab_g_stc__design_id__fam = as.factor(demo_USE$ab_g_stc__design_id__fam)
+
+#recoding the intersex child to their gender identity
+demo_USE$ab_g_stc__cohort_sex <- car::recode(demo_USE$ab_g_stc__cohort_sex, "3=1; 4=2")
+
+demo_USE$race = ifelse(demo_USE$ab_g_stc__cohort_ethnrace__leg ==1, "Hispanic", demo_USE$ab_g_stc__cohort_ethnrace__leg)
+demo_USE$race = ifelse(demo_USE$race ==2, "White", demo_USE$race)
+demo_USE$race = ifelse(demo_USE$race ==3, "Black", demo_USE$race)
+demo_USE$race = ifelse(demo_USE$race ==4, "Asian", demo_USE$race)
+demo_USE$race = ifelse(demo_USE$race ==13, "Other", demo_USE$race)
+table(demo_USE$race)
+demo_USE$race = as.factor(demo_USE$race)
+str(demo_USE$race)
+
+demo_USE$race <- factor(demo_USE$race,
+                      levels = c("White", "Hispanic", "Black", "Other", "Asian"))
+table(demo_USE$race)
+str(demo_USE$race)
+
+demo_USE$sex = as.factor(demo_USE$ab_g_stc__cohort_sex)
+
+#Recoding Parent Education
+#Recoding for numbers 0-8 to be #1 for less than high school education
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 0] <- 1
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 1] <- 1
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 2] <- 1
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 3] <- 1
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 4] <- 1
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 5] <- 1
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 6] <- 1
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 7] <- 1
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 8] <- 1
+
+#Recoding for numbers 9-12 to be #2 for some high school
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 9] <- 2
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 10] <- 2
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 11] <- 2
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 12] <- 2
+
+#Recoding for numbers 13-14 to be #3 for high school graduate or GED
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 13] <- 3
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 14] <- 3
+
+#Recoding for numbers 15-17 to be #4 for between hs grad and bachelor
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 15] <- 4
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 16] <- 4
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 17] <- 4
+
+#Recoding for number 18 to be #5 for bachelor's degree
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 18] <- 5
+
+#Recoding for number 19-20 to be #6 for master's degree and professional
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 19] <- 6
+
+#Recoding for number 21 to be #7 for doctorate
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 20] <- 7
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 21] <- 7
+
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 777] <- NA
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 999] <- NA
+demo_USE$ab_p_demo__edu__slf_001[demo_USE$ab_p_demo__edu__slf_001 == 'n/a'] <- NA
+
+demo_USE=demo_USE[complete.cases(demo_USE),]
+final_combo = full_join(demo_USE, final_combo, by=('participant_id'))
+final_combo=final_combo[complete.cases(final_combo),]
+
+#BMI
+bmi = read_tsv('ABCDdatadir/phenotype/ph_y_anthr.tsv',show_col_types = FALSE)
+colnames(bmi)
+bmi = bmi[c("participant_id", "session_id", "ph_y_anthr__height_mean", "ph_y_anthr__weight_mean")] 
+bmi = filter(bmi, session_id=='ses-00A')
+
+bmi$ph_y_anthr__height_mean = as.numeric(bmi$ph_y_anthr__height_mean)
+bmi$ph_y_anthr__weight_mean = as.numeric(bmi$ph_y_anthr__weight_mean)
+
+#bmi calculation formula (weight × 703) ÷ (height × height) for pounds and inches
+bmi$bmi <- (bmi$ph_y_anthr__weight_mean / (bmi$ph_y_anthr__height_mean^2)) * 703
+bmi$bmi_zscore = scale(bmi$bmi, center = TRUE, scale = TRUE)
+bmi=bmi[complete.cases(bmi),]
+
+final_combo = full_join(bmi, final_combo, by=('participant_id'))
+final_combo=final_combo[complete.cases(final_combo),]
+
+```
+
+```{r Analysis Prep}
+
+#making ELA+ score, PDS avg, and parent education numeric
+final_combo$ela_plus = as.numeric(final_combo$ela_plus)
+final_combo$pds_avg = as.numeric(final_combo$pds_avg)
+final_combo$ab_p_demo__edu__slf_001 = as.numeric(final_combo$ab_p_demo__edu__slf_001)
+
+#Only including variables in the model
+final_combo = final_combo[, c("mr_y_rsfmri__corr__gpnet__aseg__def__ab__lh_mean", "mr_y_rsfmri__corr__gpnet__aseg__def__ab__rh_mean", "mr_y_rsfmri__corr__gpnet__aseg__frp__ab__lh_mean", "mr_y_rsfmri__corr__gpnet__aseg__frp__ab__rh_mean", "participant_id", "mr_y_adm__info__dev_serial", "ab_g_dyn__visit_age", "race", "sex", "ab_p_demo__edu__slf_001", "ab_g_stc__design_id__fam", "ela_plus", "pds_avg", "bmi_zscore")]
+
+final_combo = final_combo[complete.cases(final_combo),]
+final_combo = data.frame(final_combo)
+contrasts(final_combo$race)
+
+#receiving descriptive information before scaling
+describe(final_combo$pds_avg)
+describe(final_combo$ela_plus)
+table(final_combo$ela_plus)
+describe(final_combo$mr_y_rsfmri__corr__gpnet__aseg__def__ab__lh_mean)
+describe(final_combo$mr_y_rsfmri__corr__gpnet__aseg__def__ab__rh_mean)
+describe(final_combo$mr_y_rsfmri__corr__gpnet__aseg__frp__ab__lh_mean)
+describe(final_combo$mr_y_rsfmri__corr__gpnet__aseg__frp__ab__rh_mean)
+
+#Recoding for ELA+ to 1,2,3, and >=4
+final_combo$ela_plus[final_combo$ela_plus == 0] <- 0
+final_combo$ela_plus[final_combo$ela_plus == 1] <- 1
+final_combo$ela_plus[final_combo$ela_plus == 2] <- 2
+final_combo$ela_plus[final_combo$ela_plus == 3] <- 3
+final_combo$ela_plus[final_combo$ela_plus >= 4] <- 4
+table(final_combo$ela_plus)
+
+#scaling PDS
+final_combo$pds_avg = scale(final_combo$pds_avg, center = TRUE, scale = TRUE)
+
+#scaling 
+final_combo$ela_plus = scale(final_combo$ela_plus, center = TRUE, scale = TRUE)
+final_combo$mr_y_rsfmri__corr__gpnet__aseg__def__ab__lh_mean = scale(final_combo$mr_y_rsfmri__corr__gpnet__aseg__def__ab__lh_mean, center = TRUE, scale = TRUE)
+final_combo$mr_y_rsfmri__corr__gpnet__aseg__def__ab__rh_mean = scale(final_combo$mr_y_rsfmri__corr__gpnet__aseg__def__ab__rh_mean, center = TRUE, scale = TRUE)
+final_combo$mr_y_rsfmri__corr__gpnet__aseg__frp__ab__lh_mean = scale(final_combo$mr_y_rsfmri__corr__gpnet__aseg__frp__ab__lh_mean, center = TRUE, scale = TRUE)
+final_combo$mr_y_rsfmri__corr__gpnet__aseg__frp__ab__rh_mean = scale(final_combo$mr_y_rsfmri__corr__gpnet__aseg__frp__ab__rh_mean, center = TRUE, scale = TRUE)
+
+write.csv(final_combo, "final_combo.csv")
+
+#finding the new treat & control values
+table(final_combo$ela_plus)
+#-1.59345379146919 for ELA+ 0 
+# 2.40654620853081 for ELA+ 4+ 
+
+```
+
+```{r lNAcc-DMN analysis}
+
+detach("package:lmerTest")
+
+fit.mediator = lmer(pds_avg ~ ela_plus*sex + (1 | ab_g_stc__design_id__fam) + mr_y_adm__info__dev_serial + ab_g_dyn__visit_age + race + ab_p_demo__edu__slf_001 + bmi_zscore, data=final_combo)
+fit.dv = lmer(mr_y_rsfmri__corr__gpnet__aseg__def__ab__lh_mean ~ ela_plus*sex + pds_avg + (1 | ab_g_stc__design_id__fam) + mr_y_adm__info__dev_serial + ab_g_dyn__visit_age + race + ab_p_demo__edu__slf_001 + bmi_zscore, data=final_combo)
+
+#will give me overall effect - this is for ELA+ 0-4+
+results <- mediate(fit.mediator, fit.dv, treat="ela_plus", mediator = "pds_avg", treat.value =  2.40654620853081 , control.value = -1.59345379146919)
+summary(results)
+
+library(lmerTest)
+#have to set the model again since we reloaded lmerTest to get the p-values
+fit.mediator = lmer(pds_avg ~ ela_plus*sex + (1 | ab_g_stc__design_id__fam) + mr_y_adm__info__dev_serial + ab_g_dyn__visit_age + race + ab_p_demo__edu__slf_001 + bmi_zscore, data=final_combo)
+fit.dv = lmer(mr_y_rsfmri__corr__gpnet__aseg__def__ab__lh_mean ~ ela_plus*sex + pds_avg + (1 | ab_g_stc__design_id__fam) + mr_y_adm__info__dev_serial + ab_g_dyn__visit_age + race + ab_p_demo__edu__slf_001 + bmi_zscore, data=final_combo)
+summary(fit.mediator)
+summary(fit.dv)
+
+```
+
+```{r rNAcc-DMN analysis}
+
+detach("package:lmerTest")
+
+fit.mediator = lmer(pds_avg ~ ela_plus*sex + (1 | ab_g_stc__design_id__fam) + mr_y_adm__info__dev_serial + ab_g_dyn__visit_age + race + ab_p_demo__edu__slf_001 + bmi_zscore, data=final_combo)
+fit.dv = lmer(mr_y_rsfmri__corr__gpnet__aseg__def__ab__rh_mean ~ ela_plus*sex + pds_avg + (1 | ab_g_stc__design_id__fam) + mr_y_adm__info__dev_serial + ab_g_dyn__visit_age + race + ab_p_demo__edu__slf_001 + bmi_zscore, data=final_combo)
+
+#will give me overall effect
+results <- mediate(fit.mediator, fit.dv, treat="ela_plus", mediator = "pds_avg", treat.value = 2.40654620853081 , control.value = -1.59345379146919)
+summary(results)
+
+library(lmerTest)
+fit.mediator = lmer(pds_avg ~ ela_plus*sex + (1 | ab_g_stc__design_id__fam) + mr_y_adm__info__dev_serial + ab_g_dyn__visit_age + race + ab_p_demo__edu__slf_001 + bmi_zscore, data=final_combo)
+fit.dv = lmer(mr_y_rsfmri__corr__gpnet__aseg__def__ab__rh_mean ~ ela_plus*sex + pds_avg + (1 | ab_g_stc__design_id__fam) + mr_y_adm__info__dev_serial + ab_g_dyn__visit_age + race + ab_p_demo__edu__slf_001 + bmi_zscore, data=final_combo)
+summary(fit.mediator)
+summary(fit.dv)
+
+```
+
+```{r lNAcc-FPN analysis}
+
+detach("package:lmerTest")
+
+fit.mediator = lmer(pds_avg ~ ela_plus*sex + (1 | ab_g_stc__design_id__fam) + mr_y_adm__info__dev_serial + ab_g_dyn__visit_age + race + ab_p_demo__edu__slf_001 + bmi_zscore, data=final_combo)
+fit.dv = lmer(mr_y_rsfmri__corr__gpnet__aseg__frp__ab__lh_mean ~ ela_plus*sex + pds_avg + (1 | ab_g_stc__design_id__fam) + mr_y_adm__info__dev_serial + ab_g_dyn__visit_age + race + ab_p_demo__edu__slf_001 + bmi_zscore, data=final_combo)
+
+#will give me overall effect
+results <- mediate(fit.mediator, fit.dv, treat="ela_plus", mediator = "pds_avg", treat.value = 2.40654620853081 , control.value = -1.59345379146919)
+summary(results)
+
+library(lmerTest)
+fit.mediator = lmer(pds_avg ~ ela_plus*sex + (1 | ab_g_stc__design_id__fam) + mr_y_adm__info__dev_serial + ab_g_dyn__visit_age + race + ab_p_demo__edu__slf_001 + bmi_zscore, data=final_combo)
+fit.dv = lmer(mr_y_rsfmri__corr__gpnet__aseg__frp__ab__lh_mean ~ ela_plus*sex + pds_avg + (1 | ab_g_stc__design_id__fam) + mr_y_adm__info__dev_serial + ab_g_dyn__visit_age + race + ab_p_demo__edu__slf_001 + bmi_zscore, data=final_combo)
+summary(fit.mediator)
+summary(fit.dv)
+
+```
+
+```{r rNAcc-FPN analysis}
+
+
+detach("package:lmerTest")
+
+fit.mediator = lmer(pds_avg ~ ela_plus*sex + (1 | ab_g_stc__design_id__fam) + mr_y_adm__info__dev_serial + ab_g_dyn__visit_age + race + ab_p_demo__edu__slf_001 + bmi_zscore, data=final_combo)
+fit.dv = lmer(mr_y_rsfmri__corr__gpnet__aseg__frp__ab__rh_mean ~ ela_plus*sex + pds_avg + (1 | ab_g_stc__design_id__fam) + mr_y_adm__info__dev_serial + ab_g_dyn__visit_age + race + ab_p_demo__edu__slf_001 + bmi_zscore, data=final_combo)
+
+#will give me overall effect
+results <- mediate(fit.mediator, fit.dv, treat="ela_plus", mediator = "pds_avg", treat.value = 2.40654620853081 , control.value = -1.59345379146919)
+summary(results)
+
+
+#Follow-up analyses for ELA+ distribution 
+#this is for the rest of the ace levels since the overall model is significant 
+#0-3 ELA+
+results.r.fpn.ace3 <- mediation::mediate(fit.mediator, fit.dv, treat="ela_plus", mediator = "pds_avg", control.value = -1.59345379146919, treat.value = 1.40654620853081)
+summary(results.r.fpn.ace3)
+
+#0-2 ELA+
+results.r.fpn.ace2 <- mediation::mediate(fit.mediator, fit.dv, treat="ela_plus", mediator = "pds_avg", control.value = -1.59345379146919, treat.value = 0.406546208530806)
+summary(results.r.fpn.ace2)
+
+#0-1 ELA+
+results.r.fpn.ace1 <- mediation::mediate(fit.mediator, fit.dv, treat="ela_plus", mediator = "pds_avg", control.value = -1.59345379146919, treat.value = -0.593453791469194)
+summary(results.r.fpn.ace1)
+
+library(lmerTest)
+fit.mediator = lmer(pds_avg ~ ela_plus*sex + (1 | ab_g_stc__design_id__fam) + mr_y_adm__info__dev_serial + ab_g_dyn__visit_age + race + ab_p_demo__edu__slf_001 + bmi_zscore, data=final_combo)
+fit.dv = lmer(mr_y_rsfmri__corr__gpnet__aseg__frp__ab__rh_mean ~ ela_plus*sex + pds_avg + (1 | ab_g_stc__design_id__fam) + mr_y_adm__info__dev_serial + ab_g_dyn__visit_age + race + ab_p_demo__edu__slf_001 + bmi_zscore, data=final_combo)
+summary(fit.mediator)
+summary(fit.dv)
+
+```
+
+```{r Demographics}
+
+final_combo = read.csv("final_combo.csv")
+table(final_combo$ela_plus)
+describe(final_combo$ela_plus)
+table(final_combo$race)
+table(final_combo$sex)
+table(final_combo$ab_p_demo__edu__slf_001)
+describe(final_combo$ab_g_dyn__visit_age)
+describe(final_combo$pds_avg)
+describe(final_combo$mr_y_rsfmri__corr__gpnet__aseg__def__ab__lh_mean)
+describe(final_combo$mr_y_rsfmri__corr__gpnet__aseg__def__ab__rh_mean)
+describe(final_combo$mr_y_rsfmri__corr__gpnet__aseg__frp__ab__lh_mean)
+describe(final_combo$mr_y_rsfmri__corr__gpnet__aseg__frp__ab__rh_mean)
+
+```
+
