@@ -1,0 +1,45 @@
+---
+title: "NAcc_frp_rh_github"
+output: html_document
+date: "2026-09-02"
+---
+
+```{r read_data}
+#Reading in the CSV we created after running the setup file
+final_combo=read.csv("/final_combo_7.0_KK.csv")
+final_combo$sex=as.factor(final_combo$sex)
+table(final_combo$ela.z)
+
+```
+
+```{r models}
+library(lme4)
+fit.mediator = lmer(pds_avg.z ~ ela.z*sex + (1 | ab_g_stc__design_id__fam) + scanner_id + age.z + race + edu.z + bmi.z, data=final_combo)
+fit.dv = lmer(frp_rh.z ~ ela.z*sex + pds_avg.z + (1 | ab_g_stc__design_id__fam) + scanner_id + age.z + race + edu.z + bmi.z, data=final_combo)
+
+```
+
+```{r mediate}
+library(mediation)
+
+results <- mediate(fit.mediator, fit.dv, sims=5000, treat="ela.z", mediator = "pds_avg.z", treat.value =  1.76424167910325, control.value = -1.1674844034256)
+summary(results)
+
+results3 <- mediate(fit.mediator, fit.dv, sims=5000, treat="ela.z", mediator = "pds_avg.z", treat.value =  1.03131015847104, control.value = -1.1674844034256)
+summary(results3)
+
+results2 <- mediate(fit.mediator, fit.dv, sims=5000, treat="ela.z", mediator = "pds_avg.z", treat.value =  0.298378637838825, control.value = -1.1674844034256)
+summary(results2)
+
+results1 <- mediate(fit.mediator, fit.dv, sims=5000, treat="ela.z", mediator = "pds_avg.z", treat.value = -0.434552882793386, control.value = -1.1674844034256)
+summary(results1)
+
+```
+
+```{r model-output}
+library(lmerTest)
+fit.mediator = lmer(pds_avg.z ~ ela.z*sex + (1 | ab_g_stc__design_id__fam) + scanner_id + age.z + race + edu.z + bmi.z, data=final_combo)
+fit.dv = lmer(frp_rh.z ~ ela.z*sex + pds_avg.z + (1 | ab_g_stc__design_id__fam) + scanner_id + age.z + race + edu.z + bmi.z, data=final_combo)
+summary(fit.mediator)
+summary(fit.dv)
+```
