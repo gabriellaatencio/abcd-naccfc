@@ -4,3 +4,5 @@ This data analysis utilizes the ABCD Data Release 7.0.
 
 The code used for the ELA score came from Breslin et al. (2025), please find below the githib link.
 https://github.com/karalk07/abcd-ela 
+
+Please see/run the setup file prior to the analyses files. 
